@@ -1,3 +1,10 @@
+/*
+ * Elementary virtual machine to understand instruction sets, parsing
+ * and gain a better general understaning of computers.
+ *
+ * AUTHOR: Pierre-Charles Dussault
+ * SINCE: 2021/10/21
+ * */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -17,7 +24,8 @@ uint16_t sign_extend(uint16_t x, int bit_count);
 void update_flags(uint16_t r);
 
 
-/* 65536 memory locations */
+/* ----- VM Setup ----- */
+
 uint16_t memory[UINT16_MAX];
 
 /* Registers */
@@ -68,7 +76,10 @@ enum {
   FL_ZRO = 1 << 1, /* Z Zero */
   FL_NEG = 1 << 2 /* N Negative */
 };
+/* end of VM Setup */
 
+
+/* ----- Main Program ----- */
 
 int main(int argc, const char* argv[]) {
   /* Load arguments */
@@ -84,21 +95,19 @@ int main(int argc, const char* argv[]) {
     }
   } /* end of loading arguments */
 
-  /* Set the PC (program counter) to the memory address where the program
-   * starts. */
+  /* Set a constant for the PC (program counter) at the memory address where the
+   * program starts. */
   enum {PC_START = 0x3000};
   regs[R_PC] = PC_START;
 
   int running = 1;
   while (running) {
-    /* FETCH */
-    /* The pointer is 'post-incremented' */
-    uint16_t instruction = mem_read(regs[R_PC]++);
+    /* Fetch the instruction */
+    uint16_t instruction = mem_read(regs[R_PC]++); /* The pointer is post-incremented */
     uint16_t operation = instruction >> 12;
 
     switch (operation) {
-      case OP_ADD:
-        {
+      case OP_ADD: {
           /* Destination register (DR) */
           uint16_t r0 = (instruction >> 9) & 0b111; /* this removes left-trailing bits */
           /* First operand (SR1) */
@@ -167,10 +176,11 @@ int main(int argc, const char* argv[]) {
         break;
     }
   }
-}
+} /* end of Main Program */
 
 
-/* Helper functions */
+
+/* ----- Helper functions ----- */
 
 uint16_t sign_extend(uint16_t x, int bit_count) {
   /* Get the right-most bit from the binary_num, and pass it through bitwise
