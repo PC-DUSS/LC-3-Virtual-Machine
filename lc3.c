@@ -1,6 +1,6 @@
 /*
  * Elementary virtual machine to understand instruction sets, parsing
- * and gain a better general understaning of computers.
+ * and gain a better general understanding of computers.
  *
  * AUTHOR: Pierre-Charles Dussault
  * SINCE: 2021/10/21
