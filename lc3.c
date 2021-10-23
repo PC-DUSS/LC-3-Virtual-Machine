@@ -22,6 +22,20 @@
 /* Function declarations */
 uint16_t sign_extend(uint16_t x, int bit_count);
 void update_flags(uint16_t r);
+void handle_ADD(uint16_t instruction, uint16_t regs[]);
+void handle_AND(uint16_t instruction, uint16_t regs[]);
+void handle_NOT(uint16_t instruction, uint16_t regs[]);
+void handle_BR(uint16_t instruction, uint16_t regs[]);
+void handle_LD(uint16_t instruction, uint16_t regs[]);
+void handle_LDI(uint16_t instruction, uint16_t regs[]);
+void handle_LDR(uint16_t instruction, uint16_t regs[]);
+void handle_LEA(uint16_t instruction, uint16_t regs[]);
+void handle_JMP(uint16_t instruction, uint16_t regs[]);
+void handle_JSR(uint16_t instruction, uint16_t regs[]);
+void handle_ST(uint16_t instruction, uint16_t regs[]);
+void handle_STI(uint16_t instruction, uint16_t regs[]);
+void handle_STR(uint16_t instruction, uint16_t regs[]);
+void handle_TRAP(uint16_t instruction, uint16_t regs[]);
 
 
 /* ----- VM Setup ----- */
@@ -82,7 +96,7 @@ enum {
 /* ----- Main Program ----- */
 
 int main(int argc, const char* argv[]) {
-  /* Load arguments */
+  /* Input validation */
   if (argc < 2) {
     printf("Correct usage:\nlc3 [<image-file1>, <image-file2>, ...]\n");
     exit(2);
@@ -93,84 +107,67 @@ int main(int argc, const char* argv[]) {
       printf("failed to load image: %s\n", argv[index]);
       exit(1);
     }
-  } /* end of loading arguments */
+  } /* end of Input validation */
 
-  /* Set a constant for the PC (program counter) at the memory address where the
-   * program starts. */
+  /* Set a constant for the address where the program starts, and store it in
+   * the Program Counter register */
   enum {PC_START = 0x3000};
   regs[R_PC] = PC_START;
 
   int running = 1;
   while (running) {
-    /* Fetch the instruction */
-    uint16_t instruction = mem_read(regs[R_PC]++); /* The pointer is post-incremented */
+    /* Read the current instruction, and determine what operation to do */
+    uint16_t instruction = mem_read(regs[R_PC]++);
     uint16_t operation = instruction >> 12;
 
+    /* See 'Helper functions' for the behaviour of each handling function */
     switch (operation) {
-      case OP_ADD: {
-          /* Destination register (DR) */
-          uint16_t r0 = (instruction >> 9) & 0b111; /* this removes left-trailing bits */
-          /* First operand (SR1) */
-          uint16_t r1 = (instruction >> 6) & 0b111;
-          /* Whether we are in immediate mode */
-          uint16_t imm_flag = (instruction >> 5) & 0b1;
-
-          if (imm_flag) {
-            uint16_t imm5 = sign_extend(instruction & 0b11111, 5);
-            /* Add the value stored at the address of r1 (which can be
-             * +/- 2^15) with the immediately value (which must be in range
-             * [-16, 15]) */
-            regs[r0] = regs[r1] + imm5;
-          } else {
-            uint16_t r2 = instruction & 0b111;
-            /* Remember this total must be representable by 16bits or bits will fall off. */
-            regs[r0] = regs[r1] + regs[r2];
-          }
-
-          update_flags(r0);
-        }
+      case OP_ADD:
+        handle_ADD(instruction, regs);
         break;
       case OP_AND:
-        {AND, 7}
+        handle_AND(instruction, regs);
         break;
       case OP_NOT:
-        {NOT, 7}
+        handle_NOT(instruction, regs);
         break;
       case OP_BR:
-        {BR, 7}
+        handle_BR(instruction, regs);
         break;
       case OP_JMP:
-        {JMP, 7}
+        handle_JMP(instruction, regs);
         break;
       case OP_JSR:
-        {JSR, 7}
+        handle_JSR(instruction, regs);
         break;
       case OP_LD:
-        {LD, 7}
+        handle_LD(instruction, regs);
         break;
       case OP_LDI:
-        {LDI, 6}
+        handle_LDI(instruction, regs);
         break;
       case OP_LDR:
-        {LDR, 7}
+        handle_LDR(instruction, regs);
         break;
       case OP_LEA:
-        {LEA, 7}
+        handle_LEA(instruction, regs);
         break;
       case OP_ST:
-        {ST, 7}
+        handle_ST(instruction, regs);
         break;
       case OP_STI:
-        {STI, 7}
+        handle_STI(instruction, regs);
         break;
       case OP_STR:
-        {STR, 7}
+        handle_STR(instruction, regs);
         break;
       case OP_TRAP:
-        {TRAP, 8}
+        handle_TRAP(instruction, regs);
         break;
       case OP_RES:
+        /* Unused */
       case OP_RTI:
+        /* Unused */
       default:
         {BAD_OPCODE, 7}
         break;
@@ -208,3 +205,79 @@ void update_flags(uint16_t r) {
     regs[R_COND] = FL_POS;
   }
 }
+
+void handle_ADD(uint16_t instruction, uint16_t regs[]) {
+  /* Destination register (DR) */
+  uint16_t r0 = (instruction >> 9) & 0b111; /* this removes left-trailing bits */
+  /* First operand (SR1) */
+  uint16_t r1 = (instruction >> 6) & 0b111;
+  /* Whether we are in immediate mode */
+  uint16_t imm_flag = (instruction >> 5) & 0b1;
+
+  if (imm_flag) {
+    uint16_t imm5 = sign_extend(instruction & 0b11111, 5);
+    /* Add the value stored at the address of r1 (which can be
+     * +/- 2^15) with the immediately value (which must be in range
+     * [-16, 15]) */
+    regs[r0] = regs[r1] + imm5;
+  } else {
+    uint16_t r2 = instruction & 0b111;
+    /* Remember this total must be representable by 16bits or bits will fall off. */
+    regs[r0] = regs[r1] + regs[r2];
+  }
+
+  update_flags(r0);
+}
+
+void handle_AND(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_NOT(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_BR(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_JMP(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_JSR(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_LD(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_LDI(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_LDR(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_LEA(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_ST(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_STI(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_STR(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
+void handle_TRAP(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
+
