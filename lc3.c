@@ -36,7 +36,7 @@ void handle_ST(uint16_t instruction, uint16_t regs[]);
 void handle_STI(uint16_t instruction, uint16_t regs[]);
 void handle_STR(uint16_t instruction, uint16_t regs[]);
 void handle_TRAP(uint16_t instruction, uint16_t regs[]);
-
+void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]);
 
 /* ----- VM Setup ----- */
 
@@ -120,8 +120,6 @@ int main(int argc, const char* argv[]) {
     /* Read the current instruction, and determine what operation to do */
     uint16_t instruction = mem_read(regs[R_PC]++);
     uint16_t operation = instruction >> 12;
-
-    /* See 'Helper functions' for the behaviour of each handling function */
     switch (operation) {
       case OP_ADD:
         handle_ADD(instruction, regs);
@@ -170,7 +168,7 @@ int main(int argc, const char* argv[]) {
       case OP_RTI:
         /* Unused */
       default:
-        {BAD_OPCODE, 7}
+        handle_BAD_OPCODE(instruction, regs);
         break;
     }
   }
@@ -189,8 +187,8 @@ uint16_t sign_extend(uint16_t x, int bit_count) {
   /* The if condition is triggered if the right-most bit indicates a negative
    * number */
 
-    /* This does bitwise OR with x and a 16-bit number with the (bit_count)
-     * left-most bits as zeros */
+    /* This does bitwise OR with x and a 16-bit number with a number of
+     * right-most bits as zeros equal to the given bit_count */
     x |= (0xFFFF << bit_count);
   }
 
@@ -209,7 +207,7 @@ void update_flags(uint16_t r) {
 
 void handle_ADD(uint16_t instruction, uint16_t regs[]) {
   /* Destination register (DR) */
-  uint16_t r0 = (instruction >> 9) & 0b111; /* this removes left-trailing bits */
+  uint16_t r0 = (instruction >> 9) & 0b111; /* removes left-trailing bits */
   /* First operand (SR1) */
   uint16_t r1 = (instruction >> 6) & 0b111;
   /* Whether we are in immediate mode */
@@ -223,10 +221,12 @@ void handle_ADD(uint16_t instruction, uint16_t regs[]) {
     regs[r0] = regs[r1] + imm5;
   } else {
     uint16_t r2 = instruction & 0b111;
-    /* Remember this total must be representable by 16bits or bits will fall off. */
+    /* This sum must be representable by 16bits or bits will fall off. */
     regs[r0] = regs[r1] + regs[r2];
   }
 
+  /* Every time an instruction modifies a register, we need to update th
+   * condition flag */
   update_flags(r0);
 }
 
@@ -282,3 +282,6 @@ void handle_TRAP(uint16_t instruction, uint16_t regs[]) {
   /* TODO */
 }
 
+void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]) {
+  /* TODO */
+}
