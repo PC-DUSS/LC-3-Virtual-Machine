@@ -40,6 +40,7 @@ void handle_TRAP(uint16_t instruction, uint16_t regs[]);
 
 /* ----- VM Setup ----- */
 
+/* Memory array size, and individual block size */
 uint16_t memory[UINT16_MAX];
 
 /* Registers */
@@ -71,11 +72,11 @@ enum {
   OP_LD, /* LD Load */
   OP_ST, /* ST Store */
   OP_JSR, /* JSR Jump register */
-  OP_AND, /* AND Bitwise AND */
+  OP_AND, /* AND And */
   OP_LDR, /* LDR Load register */
   OP_STR, /* STR Store register */
   OP_RTI, /* RTI Unused */
-  OP_NOT, /* NOT Bitwise NOT */
+  OP_NOT, /* NOT Not */
   OP_LDI, /* LDI Load indirect */
   OP_STI, /* STI Store indirect */
   OP_JMP, /* JMP Jump */
