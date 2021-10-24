@@ -303,9 +303,9 @@ void handle_BR(uint16_t instruction, uint16_t regs[]) {
   
   if (local_flag) {
     regs[R_PC] += sign_extend(instruction & 0x1FF, 9); /* bitmask 111111111 */
-    /* Here we need to manually update the flags, since we do not use a
-     * destination register that can be evaluated, and are dealing, rather,
-     * with a boolean outcome */
+    /*  TODO: Here, do we update_flags with the modified register R_PC? Or do we
+     *  set it manually depending on the boolean outcome of the Branch
+     *  instruction */
     regs[R_COND] = FL_P;
   } else {
     regs[R_COND] = FL_N;
