@@ -59,7 +59,7 @@ enum {
   R_R4,
   R_R5,
   R_R6, /* Stack pointer */
-  R_R7, /* Links back to instruction after a subroutine call */
+  R_R7, /* Links back to instruction after a subroutine returns */
   R_PC, /* Program counter */
   R_COND, /* Info about previous calculation */
   R_COUNT /* Total number of registers, including itself */
@@ -193,7 +193,7 @@ uint16_t sign_extend(uint16_t x, int bit_count) {
    * passed value x
    * */
 
-  if ((x >> (bit_count - 1)) & 0b1) {
+  if ((x >> (bit_count - 1)) & 1) {
     /* The condition is triggered if the last bit == 1, indicating a negative
      * number */
     x |= (0xFFFF << bit_count);
@@ -220,67 +220,58 @@ void handle_ADD(uint16_t instruction, uint16_t regs[]) {
    * 16bit vector so that it begins with bit [9]. Then filter out the bits
    * passed the bit [11] using an AND with a 111 bitmask, since bits [9 : 11]
    * will be the first 3 bits */
-  uint16_t dr_index = (instruction >> 9) & 0b111;
+  uint16_t dr_index = (instruction >> 9) & 0x7;
   /* First operand (SR1) */
-  uint16_t sr1_index = (instruction >> 6) & 0b111;
+  uint16_t sr1_index = (instruction >> 6) & 0x7;
   /* Whether we are in immediate mode */
-  uint16_t imm_flag = (instruction >> 5) & 0b1;
+  uint16_t imm_flag = (instruction >> 5) & 1;
 
   if (imm_flag) {
-    uint16_t imm5 = sign_extend(instruction & 0b11111, 5);
+    uint16_t imm5 = sign_extend(instruction & 0x1F, 5);
     /* Add the value stored at the address of sr1_index (which can be
      * +/- 2^15) with the immediately value (which must be in range
      * [-16, 15]) */
     regs[dr_index] = regs[sr1_index] + imm5;
   } else {
-    uint16_t sr2_index = instruction & 0b111;
+    uint16_t sr2_index = instruction & 0x7;
     /* This sum must be representable by 16bits or bits will fall off. */
     regs[dr_index] = regs[sr1_index] + regs[sr2_index];
   }
 
-  /* Every time an instruction modifies a register, we need to update the
-   * condition flag */
   update_flags(dr_index);
 }
 
 void handle_AND(uint16_t instruction, uint16_t regs[]) {
   /* Gather instruction and filter with bitmask */
-  uint16_t dr_index = instruction >> 9 & 0b111;
-  uint16_t sr1_index = instruction >> 6 & 0b111;
+  uint16_t dr_index = instruction >> 9 & 0x7;
+  uint16_t sr1_index = instruction >> 6 & 0x7;
 
-  if (instruction >> 5 & 0b1) {
+  if (instruction >> 5 & 1) {
     /* If bit [5] == 1, DR = SR1 AND imm5 */
     uint16_t imm5 = sign_extend(instruction & 0x1F, 5);
-    regs[dr_index] = mem_read(sr1_index) & imm5;
+    regs[dr_index] = mem_read(regs[sr1_index]) & imm5;
 
   } else {
     /* If bit [5] == 0, DR = SR1 AND SR2 */
-    uint16_t sr2_index = instruction & 0b111;
-    regs[dr_index] = mem_read(sr1_index) & mem_read(sr2_index);
+    uint16_t sr2_index = instruction & 0x7;
+    regs[dr_index] = mem_read(regs[sr1_index]) & mem_read(regs[sr2_index]);
   }
 
-  /* As always, update condition flag */
   update_flags(dr_index);
 }
 
 void handle_NOT(uint16_t instruction, uint16_t regs[]) {
-  uint16_t dr_index = instruction >> 9 & 0b111;
-  uint16_t sr_index = instruction >> 6 & 0b111;
-  regs[dr_index] = ~mem_read(SR);
+  uint16_t dr_index = instruction >> 9 & 0x7;
+  uint16_t sr_index = instruction >> 6 & 0x7;
+  regs[dr_index] = ~mem_read(regs[sr_index]);
   update_flags(dr_index);
 }
 
 void handle_BR(uint16_t instruction, uint16_t regs[]) {
-  /* BR stands for Branch */
-
-  /* Local flag to determine if the branch should be executed. Turn this to 1
-   * if any tested condition is met */
   uint16_t local_flag = 0;
-
-  /* Local flag to determine if a condition should be checked */
-  uint16_t n_flag = instruction >> 11 & 0b1;
-  uint16_t z_flag = instruction >> 10 & 0b1;
-  uint16_t p_flag = instruction >> 9 & 0b1;
+  uint16_t n_flag = instruction >> 11 & 1;
+  uint16_t z_flag = instruction >> 10 & 1;
+  uint16_t p_flag = instruction >> 9 & 1;
 
   /* If no condition is checked, set local_flag to 1 unconditionally */
   if (!(n_flag || z_flag || p_flag))
@@ -301,46 +292,37 @@ void handle_BR(uint16_t instruction, uint16_t regs[]) {
     if (regs[R_COND] == FL_P)
       local_flag = 1;
   
-  if (local_flag) {
-    regs[R_PC] += sign_extend(instruction & 0x1FF, 9); /* bitmask 111111111 */
-    /*  TODO: Here, do we update_flags with the modified register R_PC? Or do we
-     *  set it manually depending on the boolean outcome of the Branch
-     *  instruction */
-    regs[R_COND] = FL_P;
-  } else {
-    regs[R_COND] = FL_N;
-  }
+  if (local_flag)
+    regs[R_PC] += sign_extend(instruction & 0x1FF, 9);
 }
 
 void handle_JMP(uint16_t instruction, uint16_t regs[]) {
-  uint16_t baseR_index = instruction >> 6 & 0b111;
-  regs[R_PC] = mem_read(regs[baseR_index]);
-  
-  /* TODO: Here, I am unsure if jumping back to instruction after the end of the
-   * subroutine counts as a positive flag or negative flag
-   * */
+  uint16_t baseR_index = instruction >> 6 & 0x7;
+  regs[R_PC] = regs[baseR_index];
 }
 
 void handle_JSR(uint16_t instruction, uint16_t regs[]) {
-  /* Jump to subsroutine */
   regs[R_R7] = regs[R_PC];
-  if (instruction >> 11 & 0b1) {
+  if (instruction >> 11 & 1) {
     regs[R_PC] += sign_extend(instruction & 0x7FF, 11);
   } else {
-    regs[R_PC] = mem_read(instruction >> 6 & 0x7);
+    uint16_t baseR_index = instruction >> 6 & 0x7;
+    regs[R_PC] = regs[baseR_index];
   }
-  
-  /* TODO: Conditional flags, how? */
 }
 
 void handle_LD(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t dr_index = instruction >> 9 & 0x1FF;
+  uint16_t sign_extended_offset = sign_extend(instruction & 0x1FF, 9);
+  uint16_t search_address = regs[R_PC] + sign_extended_offset;
+  regs[dr_index] = mem_read(search_address);
+  update_flags(dr_index);
 }
 
 void handle_LDI(uint16_t instruction, uint16_t regs[]) {
   /* Get the DR (bits [9:11]) by moving starting bit to bit 9, and then use
    * bitmask to filter out exceeding bits */
-  uint16_t dr_index = instruction >> 9 & 0b111;
+  uint16_t dr_index = instruction >> 9 & 0x7;
   /* Bitmask to only keep bits [0:8] (the contents of PCoffset9) */
   uint16_t relevant_instr = instruction & 0x1FF;
   /* Gather first memory address from PCoffset9 by sign-extending it*/
@@ -354,39 +336,58 @@ void handle_LDI(uint16_t instruction, uint16_t regs[]) {
   uint16_t second_reference = mem_read(sign_extended_reference);
   uint16_t real_reference_to_data = mem_read(second_reference);
   regs[dr_index] = real_reference_to_data;
+  update_flags(dr_index);
   
    * Can be refactored to:
    */
   regs[dr_index] = mem_read(mem_read(regs[R_PC] + pc_offset));
-
-  /* Finally, don't forget to update flags after each instruction! */
   update_flags(dr_index);
 }
 
 void handle_LDR(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t dr_index = instruction >> 9 & 0x7;
+  uint16_t baseR_index = instruction >> 6 & 0x7;
+  uint16_t offset = sign_extend(instruction & 0x3F, 6);
+  uint16_t search_address = regs[baseR_index] + offset;
+  regs[dr_index] = mem_read(search_address);
+  update_flags(dr_index);
 }
 
 void handle_LEA(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t dr_index = instruction >> 9 & 0x7;
+  uint16_t offset = sign_extend(instruction & 0x1FF, 9);
+  regs[dr_index] = regs[R_PC] + offset;
+  update_flags(dr_index);
 }
 
 void handle_ST(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t offset = sign_extend(instruction >> 9 & 0x1FF, 9);
+  uint16_t sr_index = instruction >> 9 & 0x7;
+  uint16_t target_address = mem_read(regs[R_PC] + offset);
+  /* TODO: stuck here */
 }
 
 void handle_STI(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t offset = sign_extend(instruction >> 9 & 0x1FF, 9);
+  uint16_t sr_index = instruction >> 9 & 0x7;
+  uint16_t target_address = mem_read(mem_read(regs[R_PC] + offset));
+  /* TODO: stuck here */
 }
 
 void handle_STR(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  uint16_t baseR_index = instruction >> 6 & 0x7;
+  uint16_t offset = sign_extend(instruction & 0x3F, 6); 
+  uint16_t target_address = regs[baseR_index] + offset;
+  /* TODO: stuck here */
 }
 
 void handle_TRAP(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  regs[R_R7] = regs[R_PC];
+  uint16_t syscall_starting_address = mem_read(instruction & 0xFF);
+  regs[R_PC] = syscall_starting_address;
 }
 
 void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]) {
-  /* TODO */
+  printf("0x000D Bad OP_CODE. Exiting");
+  exit(1);
 }
