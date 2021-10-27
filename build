@@ -1,2 +1,2 @@
 #!/usr/bin/sh
-gcc -Wall -O2 lc3.c -o lc3
+gcc -Wall lc3.c -o lc3
