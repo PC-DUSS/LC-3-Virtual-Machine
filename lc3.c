@@ -101,9 +101,9 @@ int main(int argc, const char* argv[]) {
         handle_TRAP(instruction, regs, running);
         break;
       case OP_RES:
-        /* Unused */
+        handle_RES(instruction, regs);
       case OP_RTI:
-        /* Unused */
+        handle_RTI(instruction, regs);
       default:
         handle_BAD_OPCODE(instruction, regs);
         break;

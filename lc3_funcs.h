@@ -38,6 +38,8 @@ void handle_ST(uint16_t instruction, uint16_t regs[]);
 void handle_STI(uint16_t instruction, uint16_t regs[]);
 void handle_STR(uint16_t instruction, uint16_t regs[]);
 void handle_TRAP(uint16_t instruction, uint16_t regs[], int* running);
+void handle_RES(uint16_t instruction, uint16_t regs[]);
+void handle_RTI(uint16_t instruction, uint16_t regs[]);
 void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]);
 void handle_TRAP_GETC();
 void handle_TRAP_OUT();
@@ -138,13 +140,6 @@ struct termios original_tio;
 /* ----- Helper functions ----- */
 
 uint16_t sign_extend(uint16_t x, int bit_count) {
-  /* Get the last bit from the binary_num, and pass it through bitwise
-   * AND with a bit of 1. 
-   *
-   * Here, the bit_count parameter is the number of bits present in the
-   * passed value x
-   * */
-
   if ((x >> (bit_count - 1)) & 0x1) {
     /* The condition is triggered if the last bit == 1, indicating a negative
      * number */
@@ -170,7 +165,7 @@ void update_flags(uint16_t r_index) {
 void handle_ADD(uint16_t instruction, uint16_t regs[]) {
   /* Destionation register (DR) at bits [9:11] in the bit vector. Shorten the
    * 16bit vector so that it begins with bit [9]. Then filter out the bits
-   * passed the bit [11] using an AND with a 111 bitmask, since bits [9 : 11]
+   * over the bit [11] using an AND with a 111 bitmask, since bits [9 : 11]
    * will be the first 3 bits */
   uint16_t dr_index = (instruction >> 9) & 0x7;
   /* First operand (SR1) */
@@ -180,9 +175,6 @@ void handle_ADD(uint16_t instruction, uint16_t regs[]) {
 
   if (imm_flag) {
     uint16_t imm5 = sign_extend(instruction & 0x1F, 5);
-    /* Add the value stored at the address of sr1_index (which can be
-     * +/- 2^15) with the immediately value (which must be in range
-     * [-16, 15]) */
     regs[dr_index] = regs[sr1_index] + imm5;
   } else {
     uint16_t sr2_index = instruction & 0x7;
@@ -198,7 +190,10 @@ void handle_AND(uint16_t instruction, uint16_t regs[]) {
   uint16_t dr_index = (instruction >> 9) & 0x7;
   uint16_t sr1_index = (instruction >> 6) & 0x7;
 
-  if ((instruction >> 5) & 0x1) {
+  uint16_t imm_flag = instruction & 0x20; /* 100000 bitmask, alternative method
+                                           * to obtain the desired bit*/
+
+  if (imm_flag) {
     /* If bit [5] == 1, DR = SR1 AND imm5 */
     uint16_t imm5 = sign_extend(instruction & 0x1F, 5);
     regs[dr_index] = regs[sr1_index] & imm5;
@@ -221,20 +216,12 @@ void handle_NOT(uint16_t instruction, uint16_t regs[]) {
 
 void handle_BR(uint16_t instruction, uint16_t regs[]) {
   uint16_t offset = sign_extend(instruction & 0x1FF, 9);
-  uint16_t local_flag = 0x0;
-  uint16_t p_flag = (instruction >> 9) & 0x1;
-  uint16_t z_flag = (instruction >> 10) & 0x1;
-  uint16_t n_flag = (instruction >> 11) & 0x1;
+  uint16_t cond_flag = (instruction >> 9) & 0x7;
 
-  if (((instruction >> 9) & 0x7) == 0x000) {
-    local_flag = 0x1;
-  } else if ((n_flag == regs[R_COND])
-      || (z_flag == regs[R_COND])
-      || (p_flag == regs[R_COND])) {
-    local_flag = 0x1;
-  }
-  
-  if (local_flag)
+  /* Here, we are deliberately not fully implementing the complete BRANCH
+   * specification, omitting the case of unconditional branching, when the
+   * cond_flag vector is [000] */
+  if (cond_flag & regs[R_COND])
     regs[R_PC] += offset;
 }
 
@@ -244,20 +231,23 @@ void handle_JMP(uint16_t instruction, uint16_t regs[]) {
 }
 
 void handle_JSR(uint16_t instruction, uint16_t regs[]) {
+  uint16_t flag = instruction & 0x800; /* Again the alternative way to gather
+                                        * the bit using only a bitmask without
+                                        * using a bit shift */
   regs[R_R7] = regs[R_PC];
-  if ((instruction >> 11) & 0x1) {
-    regs[R_PC] += sign_extend(instruction & 0x7FF, 11);
+  if (flag) {
+    uint16_t offset = sign_extend(instruction & 0x7FF, 11);
+    regs[R_PC] += offset; /* JSR */
   } else {
     uint16_t baseR_index = (instruction >> 6) & 0x7;
-    regs[R_PC] = regs[baseR_index];
+    regs[R_PC] = regs[baseR_index]; /* JSRR */
   }
 }
 
 void handle_LD(uint16_t instruction, uint16_t regs[]) {
   uint16_t dr_index = (instruction >> 9) & 0x7;
-  uint16_t sign_extended_offset = sign_extend(instruction & 0x1FF, 9);
-  uint16_t search_address = regs[R_PC] + sign_extended_offset;
-  regs[dr_index] = mem_read(search_address);
+  uint16_t offset = sign_extend(instruction & 0x1FF, 9);
+  regs[dr_index] = mem_read(regs[R_PC] + offset);
   update_flags(dr_index);
 }
 
@@ -269,20 +259,13 @@ void handle_LDI(uint16_t instruction, uint16_t regs[]) {
   uint16_t relevant_instr = instruction & 0x1FF;
   /* Gather first memory address from PCoffset9 by sign-extending it*/
   uint16_t pc_offset = sign_extend(relevant_instr, 9);
-  /* Gather the second reference (to be stored in the DR) at the memory address
-   * obtained by adding the one we just found with the address of the PC. 
-   * I am making all the steps clear here, but you could refactor in less lines
-   * for better efficiency
-
-  uint16_t sign_extended_reference = regs[R_PC] + pc_offset
+  /* Gather the second memory address (to be stored in the DR) at the memory
+   * address obtained by adding the one we just found with the address of the
+   * PC. */
+  uint16_t sign_extended_reference = regs[R_PC] + pc_offset;
   uint16_t second_reference = mem_read(sign_extended_reference);
   uint16_t real_reference_to_data = mem_read(second_reference);
   regs[dr_index] = real_reference_to_data;
-  update_flags(dr_index);
-  
-   * Can be refactored to:
-   */
-  regs[dr_index] = mem_read(mem_read(regs[R_PC] + pc_offset));
   update_flags(dr_index);
 }
 
@@ -290,8 +273,7 @@ void handle_LDR(uint16_t instruction, uint16_t regs[]) {
   uint16_t dr_index = (instruction >> 9) & 0x7;
   uint16_t baseR_index = (instruction >> 6) & 0x7;
   uint16_t offset = sign_extend(instruction & 0x3F, 6);
-  uint16_t search_address = regs[baseR_index] + offset;
-  regs[dr_index] = mem_read(search_address);
+  regs[dr_index] = mem_read(regs[baseR_index] + offset);
   update_flags(dr_index);
 }
 
@@ -305,34 +287,25 @@ void handle_LEA(uint16_t instruction, uint16_t regs[]) {
 void handle_ST(uint16_t instruction, uint16_t regs[]) {
   uint16_t sr_index = (instruction >> 9) & 0x7;
   uint16_t offset = sign_extend(instruction & 0x1FF, 9);
-  uint16_t target_address = regs[R_PC] + offset;
-  mem_write(target_address, regs[sr_index]);
+  mem_write(regs[R_PC] + offset, regs[sr_index]);
 }
 
 void handle_STI(uint16_t instruction, uint16_t regs[]) {
   uint16_t sr_index = (instruction >> 9) & 0x7;
-  uint16_t offset = sign_extend((instruction >> 9) & 0x1FF, 9);
-  uint16_t target_address = mem_read(regs[R_PC] + offset);
-  mem_write(target_address, regs[sr_index]);
+  uint16_t offset = sign_extend(instruction & 0x1FF, 9);
+  mem_write(mem_read(regs[R_PC] + offset), regs[sr_index]);
 }
 
 void handle_STR(uint16_t instruction, uint16_t regs[]) {
   uint16_t sr_index = (instruction >> 9) & 0x7;
   uint16_t baseR_index = (instruction >> 6) & 0x7;
   uint16_t offset = sign_extend(instruction & 0x3F, 6); 
-  uint16_t target_address = regs[baseR_index] + offset;
-  mem_write(target_address, regs[sr_index]);
+  mem_write(regs[baseR_index] + offset, regs[sr_index]);
 }
 
 void handle_TRAP(uint16_t instruction, uint16_t regs[], int* running) {
-  regs[R_R7] = regs[R_PC];
-  uint16_t mem_location = instruction & 0xFF;
-  uint16_t syscall_starting_address = mem_read(mem_location);
-  regs[R_PC] = syscall_starting_address;
-  /* Not exactly sure why we need to set the PC to the mem_location if we are
-   * going to handle the sys_call ourselves anyway */
-
-  switch(mem_location) {
+  uint16_t trap_code = instruction & 0xFF;
+  switch(trap_code) {
     case TRAP_GETC:
       handle_TRAP_GETC();
       break;
@@ -354,7 +327,19 @@ void handle_TRAP(uint16_t instruction, uint16_t regs[], int* running) {
   }
 }
 
+void handle_RTI(uint16_t instruction, uint16_t regs[]) {
+  /* RTI is unused in this VM */
+  handle_BAD_OPCODE(instruction, regs);
+}
+
+void handle_RES(uint16_t instruction, uint16_t regs[]) {
+  /* RES is unused in this VM */
+  handle_BAD_OPCODE(instruction, regs);
+}
+
 void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]) {
+  /* Get arguments in case we could ever implement them in the bad opcode
+   * subroutine */
   abort();
 }
 
@@ -414,7 +399,7 @@ void handle_TRAP_PUTSP() {
 }
 
 void handle_TRAP_HALT(int* running) {
-  puts("Program halted.");
+  puts("HALT");
   fflush(stdout);
   *running = 0;
 }
