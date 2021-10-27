@@ -3,6 +3,7 @@
  * and gain a better general understanding of computers.
  * Made alongside the exercise created by Justin Meiners and Ryan Pendleton,
  * 'Write Your Own Virtual Machine'
+ * link: https://justinmeiners.github.io/lc3-vm/
  *
  * AUTHOR: Pierre-Charles Dussault
  * SINCE: 2021/10/21
