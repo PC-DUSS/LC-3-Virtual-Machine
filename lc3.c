@@ -9,18 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-
-/*
 #include <signal.h>
-
+/* Unix specific */
 #include <unistd.h>
 #include <fcntl.h>
-
+/* Other utils */
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/termios.h>
 #include <sys/mman.h>
-*/
 
 /* Function declarations */
 uint16_t sign_extend(uint16_t x, int bit_count);
@@ -38,18 +35,22 @@ void handle_JSR(uint16_t instruction, uint16_t regs[]);
 void handle_ST(uint16_t instruction, uint16_t regs[]);
 void handle_STI(uint16_t instruction, uint16_t regs[]);
 void handle_STR(uint16_t instruction, uint16_t regs[]);
-void handle_TRAP(uint16_t instruction, uint16_t regs[]);
+void handle_TRAP(uint16_t instruction, uint16_t regs[], int* running);
 void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]);
 void handle_TRAP_GETC();
 void handle_TRAP_OUT();
 void handle_TRAP_PUTS();
 void handle_TRAP_IN();
 void handle_TRAP_PUTSP();
-void handle_TRAP_HALT();
+void handle_TRAP_HALT(int* running);
+void read_image_file(FILE* file);
+void read_image_file(FILE* file);
+uint16_t swap16(uint16_t to_swap);
+int read_image(const char* image_path);
 
 /* ----- VM Setup ----- */
 
-/* Memory array size, and individual block size */
+/* Maximum number of 16bit blocks for the memory */
 uint16_t memory[UINT16_MAX];
 
 /* Registers
@@ -138,8 +139,10 @@ int main(int argc, const char* argv[]) {
   enum {PC_START = 0x3000};
   regs[R_PC] = PC_START;
 
-  int running = 1;
-  while (running) {
+  int state = 1;
+  int *running = &state;
+
+  while (*running) {
     /* Read the current instruction, and determine what operation to do */
     uint16_t instruction = mem_read(regs[R_PC]++);
     uint16_t operation = instruction >> 12;
@@ -184,27 +187,7 @@ int main(int argc, const char* argv[]) {
         handle_STR(instruction, regs);
         break;
       case OP_TRAP:
-        switch(instruction & 0xFF) {
-          case TRAP_GETC:
-            handle_TRAP_GETC();
-            break;
-          case TRAP_OUT:
-            handle_TRAP_OUT();
-            break;
-          case TRAP_PUTS:
-            handle_TRAP_PUTS();
-            break;
-          case TRAP_IN:
-            handle_TRAP_IN();
-            break;
-          case TRAP_PUTSP:
-            handle_TRAP_PUTSP();
-            break;
-          case TRAP_HALT:
-            handle_TRAP_HALT();
-            break;
-        }
-        /* handle_TRAP(instruction, regs); */
+        handle_TRAP(instruction, regs, running);
         break;
       case OP_RES:
         /* Unused */
@@ -408,10 +391,34 @@ void handle_STR(uint16_t instruction, uint16_t regs[]) {
   mem_write(target_address, regs[sr_index]);
 }
 
-void handle_TRAP(uint16_t instruction, uint16_t regs[]) {
+void handle_TRAP(uint16_t instruction, uint16_t regs[], int* running) {
   regs[R_R7] = regs[R_PC];
-  uint16_t syscall_starting_address = mem_read(instruction & 0xFF);
+  uint16_t mem_location = instruction & 0xFF;
+  uint16_t syscall_starting_address = mem_read(mem_location);
   regs[R_PC] = syscall_starting_address;
+  /* Not exactly sure why we need to set the PC to the mem_location if we are
+   * going to handle the sys_call ourselves anyway */
+
+  switch(mem_location) {
+    case TRAP_GETC:
+      handle_TRAP_GETC();
+      break;
+    case TRAP_OUT:
+      handle_TRAP_OUT();
+      break;
+    case TRAP_PUTS:
+      handle_TRAP_PUTS();
+      break;
+    case TRAP_IN:
+      handle_TRAP_IN();
+      break;
+    case TRAP_PUTSP:
+      handle_TRAP_PUTSP();
+      break;
+    case TRAP_HALT:
+      handle_TRAP_HALT(running);
+      break;
+  }
 }
 
 void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]) {
@@ -419,18 +426,16 @@ void handle_BAD_OPCODE(uint16_t instruction, uint16_t regs[]) {
 }
 
 void handle_TRAP_GETC() {
-  uint16_t c = (uint16_t) getchar();
-  regs[R_R0] = c & 0xFF; /* Clear the last 8 bits */
+  regs[R_R0] = (uint16_t) getchar();
 }
 
 void handle_TRAP_OUT() {
-  uint16_t c = regs[R_R0] & 0xFF;
-  putc((char) c, stdout);
+  putc((char) regs[R_R0], stdout);
+  fflush(stdout);
 }
 
 void handle_TRAP_PUTS() {
   /* In memory, treat the characters as uint16_t values */
-  
   /* The string start at memory_start + R0 */
   uint16_t *c = memory + regs[R_R0];
 
@@ -447,13 +452,84 @@ void handle_TRAP_PUTS() {
 }
 
 void handle_TRAP_IN() {
-  /* TODO */
+  printf("Enter a character: ");
+  char c = getchar();
+  putc(c, stdout);
+  regs[R_R0] = (uint16_t) c;
+  fflush(stdout);
 }
 
 void handle_TRAP_PUTSP() {
-  /* TODO */
+  /* This stores one char per byte, as opposed to one char per 16bit vector,
+   * so each address would contain 2 chars instead of one */
+
+  uint16_t *c = memory + regs[R_R0];
+  uint16_t current;
+  /* End loop when *c == 0x0000 */
+  while (*c) {
+    current = *c & 0xFF; /* Get the first 8 bits */
+    putc((char) current, stdout);
+    current = *c & 0xFF00; /* Get the last 8 bits */
+    /* In case of odd number of chars, with the last 8 bits being equal to 0x00,
+     * it doesn't matter, as it will output NULL and it won't affect the string
+     * */
+    putc((char) current, stdout);
+    c++;
+  }
+
+  fflush(stdout);
 }
 
-void handle_TRAP_HALT() {
-  /* TODO */
+void handle_TRAP_HALT(int* running) {
+  puts("Program halted.");
+  fflush(stdout);
+  *running = 0;
+}
+
+uint16_t swap16(uint16_t to_swap) {
+  /* LittleComputer-3 programs are BigEndian, so in order for my consumer PC
+   * (which is LittleEndian) to read the byte-order of values correctly, we
+   * need to switch them into LittleEndian, because the program will be
+   * providing them as BigEndian initially */
+  return (to_swap << 8) | (to_swap >> 8);
+}
+
+void read_image_file(FILE* file) {
+  /* Read a file from the origin until we hit the max value possible to read
+   * given the size of our memory's array */
+  
+  uint16_t origin;
+  /* Load only the first 16bits in the file */
+  fread(&origin, sizeof(origin), 1, file);
+  /* Convert the first 16bits to Little Endian */
+  /* Here 'origin' is the actual data, and '&origin' is the pointer */
+  origin = swap16(origin);
+
+  /* Determine the maxmimum number of elements to load from the file */
+  uint16_t max_read = UINT16_MAX - origin;
+  
+  /* Set pointer at memory location for the start the program */
+  uint16_t* p = memory + origin;
+  /* Read a number of instructions equal to the maximum that our memory array
+   * can handle */
+  size_t read = fread(p, sizeof(uint16_t), max_read, file);
+
+  /* Swap all 16bit vectors to Little Endian */
+  while (read > 0) {
+    *p = swap16(*p); /* Swap the current 16bit vector */
+    p++; /* Move to the next vector */
+    read--; /* Decrement the number of remaining elements to swap */
+  }
+}
+
+int read_image(const char* image_path) {
+  /* Convenience wrapper function, which also reports the operation status */
+
+  FILE* file = fopen(image_path, "rb");
+  if (!file)
+    return 0; /* No file loaded */
+
+  read_image_file(file);
+  fclose(file);
+  return 1; /* A file was loaded */
 }
