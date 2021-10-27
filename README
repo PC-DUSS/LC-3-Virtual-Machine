@@ -1,0 +1,11 @@
+Instructions to run the LC-3 Virtual Machine
+
+1) First, inside terminal, cd to the project directory (the one containing this README)
+
+2) Make the build command executable by typing inside terminal:
+	
+chmod +x ./build
+
+3) Now run the VM by typing inside terminal:
+
+./lc3 <your-file-image>
