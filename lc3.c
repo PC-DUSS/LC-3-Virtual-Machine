@@ -1,6 +1,8 @@
 /*
  * Elementary virtual machine to understand instruction sets, parsing
  * and gain a better general understanding of computers.
+ * Made alongside the exercise created by Justin Meiners and Ryan Pendleton,
+ * 'Write Your Own Virtual Machine'
  *
  * AUTHOR: Pierre-Charles Dussault
  * SINCE: 2021/10/21
@@ -43,9 +45,8 @@ void handle_TRAP_PUTS();
 void handle_TRAP_IN();
 void handle_TRAP_PUTSP();
 void handle_TRAP_HALT(int* running);
-void read_image_file(FILE* file);
-void read_image_file(FILE* file);
 uint16_t swap16(uint16_t to_swap);
+void read_image_file(FILE* file);
 int read_image(const char* image_path);
 
 /* ----- VM Setup ----- */
