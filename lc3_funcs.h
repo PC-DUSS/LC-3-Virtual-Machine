@@ -1,4 +1,4 @@
-/* Functions used for the LittleComputer-3 VM
+/* Header for the LittleComputer-3 VM
  *
  * AUTHOR: Pierre-Charles Dussault
  * SINCE: 2021/10/26
