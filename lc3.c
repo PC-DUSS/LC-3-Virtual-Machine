@@ -48,7 +48,12 @@ void handle_TRAP_HALT(int* running);
 uint16_t swap16(uint16_t to_swap);
 void read_image_file(FILE* file);
 int read_image(const char* image_path);
-
+uint16_t mem_read(uint16_t address);
+void mem_write(uint16_t address, uint16_t value);
+uint16_t check_key();
+void disable_input_buffering();
+void restore_input_buffering();
+void handle_interrupt(int signal);
 /* ----- VM Setup ----- */
 
 /* Maximum number of 16bit blocks for the memory */
@@ -116,91 +121,16 @@ enum {
   TRAP_PUTSP = 0x24, /* Output a byte string */
   TRAP_HALT = 0x25 /* Halt the program */
 };
+
+/* Memory-mapped registers for the LittleComputer-3 */
+enum {
+  MR_KBSR = 0xFE00, /* Keyboard status (was a key pressed?) */
+  MR_KBDR = 0xFE02 /* Keyboard data (which key was it?) */
+};
+
+/* Data structure for use with terminal access in Unix */
+struct termios original_tio;
 /* end of VM Setup */
-
-
-/* ----- Main Program ----- */
-
-int main(int argc, const char* argv[]) {
-  /* Input validation */
-  if (argc < 2) {
-    printf("Correct usage:\nlc3 [<image-file1>, <image-file2>, ...]\n");
-    exit(2);
-  }
-
-  for (int index = 0; index < argc; index++) {
-    if (!read_image(argv[index])) {
-      printf("failed to load image: %s\n", argv[index]);
-      exit(1);
-    }
-  } /* end of Input validation */
-
-  /* Set a constant for the address where the program starts, and store it in
-   * the Program Counter register */
-  enum {PC_START = 0x3000};
-  regs[R_PC] = PC_START;
-
-  int state = 1;
-  int *running = &state;
-
-  while (*running) {
-    /* Read the current instruction, and determine what operation to do */
-    uint16_t instruction = mem_read(regs[R_PC]++);
-    uint16_t operation = instruction >> 12;
-    switch (operation) {
-      case OP_ADD:
-        handle_ADD(instruction, regs);
-        break;
-      case OP_AND:
-        handle_AND(instruction, regs);
-        break;
-      case OP_NOT:
-        handle_NOT(instruction, regs);
-        break;
-      case OP_BR:
-        handle_BR(instruction, regs);
-        break;
-      case OP_JMP:
-        handle_JMP(instruction, regs);
-        break;
-      case OP_JSR:
-        handle_JSR(instruction, regs);
-        break;
-      case OP_LD:
-        handle_LD(instruction, regs);
-        break;
-      case OP_LDI:
-        handle_LDI(instruction, regs);
-        break;
-      case OP_LDR:
-        handle_LDR(instruction, regs);
-        break;
-      case OP_LEA:
-        handle_LEA(instruction, regs);
-        break;
-      case OP_ST:
-        handle_ST(instruction, regs);
-        break;
-      case OP_STI:
-        handle_STI(instruction, regs);
-        break;
-      case OP_STR:
-        handle_STR(instruction, regs);
-        break;
-      case OP_TRAP:
-        handle_TRAP(instruction, regs, running);
-        break;
-      case OP_RES:
-        /* Unused */
-      case OP_RTI:
-        /* Unused */
-      default:
-        handle_BAD_OPCODE(instruction, regs);
-        break;
-    }
-  }
-} /* end of Main Program */
-
 
 
 /* ----- Helper functions ----- */
@@ -534,3 +464,145 @@ int read_image(const char* image_path) {
   fclose(file);
   return 1; /* A file was loaded */
 }
+
+uint16_t mem_read(uint16_t address) {
+  /* Getter: get a value from the block at a memory address */
+  
+  if (address == MR_KBSR) {
+    if (check_key()) {
+      memory[MR_KBSR] = 1 << 15;
+      memory[MR_KBDR] = getchar();
+    } else {
+      memory[MR_KBSR] = 0;
+    }
+  }
+
+  return memory[address];
+}
+
+void mem_write(uint16_t address, uint16_t value) {
+  /* Setter: set a memory block at a memory address to a given value */
+  memory[address] = value;
+}
+
+uint16_t check_key() {
+  /* Unix specific for keyboard access */
+  fd_set readfds;
+  FD_ZERO(&readfds);
+  FD_SET(STDIN_FILENO, &readfds);
+
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = 0;
+  return select(1, &readfds, NULL, NULL, &timeout) != 0;
+}
+
+void disable_input_buffering() {
+  /* Unix specific for terminal input */
+  tcgetattr(STDIN_FILENO, &original_tio);
+  struct termios new_tio = original_tio;
+  new_tio.c_lflag &= ~ICANON & ~ECHO;
+  tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
+}
+
+void restore_input_buffering() {
+  /* Unix specific for terminal input */
+  tcsetattr(STDIN_FILENO, TCSANOW, &original_tio);
+}
+
+void handle_interrupt(int signal) {
+  /* Unix specific for terminal input */
+  restore_input_buffering();
+  printf("\n");
+  exit(-2);
+}
+
+
+/* ----- Main Program ----- */
+
+int main(int argc, const char* argv[]) {
+  /* Input validation */
+  if (argc < 2) {
+    printf("Correct usage:\nlc3 [<image-file1>, <image-file2>, ...]\n");
+    exit(2);
+  }
+
+  for (int index = 0; index < argc; index++) {
+    if (!read_image(argv[index])) {
+      printf("failed to load image: %s\n", argv[index]);
+      exit(1);
+    }
+  } /* end of Input validation */
+
+  /* Disable keyboard input during the running of the program */
+  signal(SIGINT, handle_interrupt); /* handle_interrupt function as argument */
+  disable_input_buffering();
+
+  /* Set a constant for the address where the program starts, and store it in
+   * the Program Counter register */
+  enum {PC_START = 0x3000};
+  regs[R_PC] = PC_START;
+
+  int state = 1;
+  int *running = &state;
+
+  while (*running) {
+    /* Read the current instruction, and determine what operation to do */
+    uint16_t instruction = mem_read(regs[R_PC]++);
+    uint16_t operation = instruction >> 12;
+    switch (operation) {
+      case OP_ADD:
+        handle_ADD(instruction, regs);
+        break;
+      case OP_AND:
+        handle_AND(instruction, regs);
+        break;
+      case OP_NOT:
+        handle_NOT(instruction, regs);
+        break;
+      case OP_BR:
+        handle_BR(instruction, regs);
+        break;
+      case OP_JMP:
+        handle_JMP(instruction, regs);
+        break;
+      case OP_JSR:
+        handle_JSR(instruction, regs);
+        break;
+      case OP_LD:
+        handle_LD(instruction, regs);
+        break;
+      case OP_LDI:
+        handle_LDI(instruction, regs);
+        break;
+      case OP_LDR:
+        handle_LDR(instruction, regs);
+        break;
+      case OP_LEA:
+        handle_LEA(instruction, regs);
+        break;
+      case OP_ST:
+        handle_ST(instruction, regs);
+        break;
+      case OP_STI:
+        handle_STI(instruction, regs);
+        break;
+      case OP_STR:
+        handle_STR(instruction, regs);
+        break;
+      case OP_TRAP:
+        handle_TRAP(instruction, regs, running);
+        break;
+      case OP_RES:
+        /* Unused */
+      case OP_RTI:
+        /* Unused */
+      default:
+        handle_BAD_OPCODE(instruction, regs);
+        break;
+    }
+  }
+
+  /* Restore keyboard input at end of the program */
+  restore_input_buffering();
+} /* end of Main Program */
